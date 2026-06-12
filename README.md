@@ -42,7 +42,7 @@ This plugin requires [Decky Loader](https://github.com/SteamDeckHomebrew/decky-l
 
 ## Other Plugins
 
-Check out my other plugin [ProtonDB Badges ❤️](https://github.com/OMGDuke/protondb-decky)
+Check out my other plugin [ProtonDB Badges ❤️](https://github.com/olisikh/protondb-decky)
 
 ## Localisation
 
