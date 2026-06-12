@@ -1,5 +1,5 @@
-import { definePlugin, staticClasses } from '@decky/ui'
-import { routerHook } from '@decky/api'
+import { definePlugin, routerHook } from '@decky/api'
+import { staticClasses } from '@decky/ui'
 
 import { GiMusicalNotes } from 'react-icons/gi'
 
@@ -52,7 +52,8 @@ export default definePlugin(() => {
     )
 
   return {
-    title: <div className={staticClasses.Title}>{name}</div>,
+    name,
+    titleView: <div className={staticClasses.Title}>{name}</div>,
     icon: <GiMusicalNotes />,
     content: <Settings />,
     onDismount() {
