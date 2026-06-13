@@ -29,7 +29,6 @@ function ChangeMusicButton({ appId }: { appId: number }) {
 
 // Always add before "Properties..."
 const spliceChangeMusic = (children: any[], appid: number) => {
-  children.find((x: any) => x?.key === 'properties')
   const propertiesMenuItemIdx = children.findIndex((item) =>
     findInReactTree(
       item,
@@ -47,7 +46,7 @@ const handleItemDupes = (items: any[]) => {
   const gtmIdx = items.findIndex(
     (x: any) => x?.key === 'game-theme-music-change-music'
   )
-  if (gtmIdx != -1) items.splice(gtmIdx, 1)
+  if (gtmIdx !== -1) items.splice(gtmIdx, 1)
 }
 
 const isOpeningAppContextMenu = (items: any[]) => {
