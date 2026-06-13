@@ -28,8 +28,8 @@
   "remote_binary": [
     {
       "name": "yt-dlp",
-      "url": "https://github.com/yt-dlp/yt-dlp/releases/download/2025.06.09/yt-dlp",
-      "sha256hash": "efba94b3be7911b96bf35bb7437dcf218ab7d244def6d57982af5609f9aeeeb0"
+      "url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.06.09/yt-dlp",
+      "sha256hash": "e5d57466682cfa9d61e9cf7c8a4f09b00f4a62af37d3bbdc4bcffdf63615feac"
     }
   ],
   "devDependencies": {
