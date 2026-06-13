@@ -75,10 +75,23 @@ class Plugin:
             "-f", "bestaudio",
             "--match-filters", f"duration<?{20*60}",
             stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
             limit=10 * 1024**2,
             env={**os.environ, 'LD_LIBRARY_PATH': '/usr/lib:/lib'},
         )
         logger.info("yt-dlp search process started.")
+
+        # Log stderr in the background so failures are visible in decky logs
+        async def log_stderr():
+            if not self.yt_process or not self.yt_process.stderr:
+                return
+            while True:
+                line = await self.yt_process.stderr.readline()
+                if not line:
+                    break
+                logger.warning(f"yt-dlp stderr: {line.decode().strip()}")
+
+        asyncio.create_task(log_stderr())
 
     async def next_yt_result(self):
         async with self.yt_process_lock:
@@ -90,8 +103,12 @@ class Plugin:
                 logger.info("No more results from yt_process.")
                 return None
             logger.debug(f"Received result line: {line[:100]}...")
-            entry = json.loads(line)
-            return self.entry_to_info(entry)
+            try:
+                entry = json.loads(line)
+                return self.entry_to_info(entry)
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse yt-dlp output: {e}. Line: {line[:200]}")
+                return None
 
     @staticmethod
     def entry_to_info(entry):
