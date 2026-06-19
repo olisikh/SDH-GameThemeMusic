@@ -41,63 +41,61 @@ export default function AudioPlayer({
     setIsPlaying(video.isPlaying)
   }, [video.isPlaying])
 
-  async function getUrl(showLoading = true) {
+  async function getUrl() {
     if (audioUrl?.length && !audioUrl.includes('youtube.com') && !audioUrl.includes('youtu.be')) return audioUrl
-    if (showLoading) setLoading(true)
+    setLoading(true)
     try {
       const resolver = getResolver(settings.useYtDlp, settings.musicProvider)
       const res = await resolver.getAudioUrlFromVideo(video)
       setAudio(res)
+      setLoading(false)
       return res
     } catch (err) {
       console.error(err)
+      setLoading(false)
       return undefined
-    } finally {
-      if (showLoading) setLoading(false)
     }
   }
 
   useEffect(() => {
-    getUrl(false)
-  }, [video.id])
-
-  useEffect(() => {
     if (audioPlayer.isReady) {
       audioPlayer.setVolume(volume)
-    }
-  }, [audioPlayer.isReady, volume])
-
-  useEffect(() => {
-    if (audioPlayer.isReady) {
-      if (video.isPlaying) audioPlayer.play()
-      else audioPlayer.stop()
+      if (video.isPlaying) {
+        audioPlayer.play()
+      } else {
+        audioPlayer.stop()
+      }
     }
   }, [video.isPlaying, audioPlayer.isReady])
 
   async function togglePlay() {
     const startPlaying = !isPlaying
     setIsPlaying(startPlaying)
-    handlePlay(startPlaying)
-    if (startPlaying && !audioUrl?.length) {
-      const url = await getUrl(false)
-      if (!url?.length) {
+    if (startPlaying) {
+      const url = audioUrl || (await getUrl())
+      if (url?.length) {
+        handlePlay(true)
+      } else {
         setIsPlaying(false)
-        handlePlay(false)
       }
+    } else {
+      handlePlay(false)
     }
   }
 
   async function selectAudio() {
-    if (!video.id.length) return
-    const url = audioUrl?.length ? audioUrl : await getUrl(false)
-    if (!url?.length) return
-    setDownloading(true)
-    await selectNewAudio({
-      title: video.title,
-      videoId: video.id,
-      audioUrl: url
-    })
-    setDownloading(false)
+    if (video.id.length) {
+      const currentUrl = audioUrl || (await getUrl())
+      if (currentUrl?.length) {
+        setDownloading(true)
+        await selectNewAudio({
+          title: video.title,
+          videoId: video.id,
+          audioUrl: currentUrl
+        })
+        setDownloading(false)
+      }
+    }
   }
 
   return (

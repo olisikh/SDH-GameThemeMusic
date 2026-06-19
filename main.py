@@ -195,8 +195,12 @@ class Plugin:
             }
             mime_type = mime_types.get(extension, "audio/webm")
             
-            with open(local_match, "rb") as file:
-                return f"data:{mime_type};base64,{base64.b64encode(file.read()).decode()}"
+            def _encode_file(path: str) -> str:
+                with open(path, "rb") as f:
+                    return base64.b64encode(f.read()).decode()
+            
+            encoded = await asyncio.to_thread(_encode_file, local_match)
+            return f"data:{mime_type};base64,{encoded}"
 
         result = await asyncio.create_subprocess_exec(
             f"{decky.DECKY_PLUGIN_DIR}/bin/yt-dlp",
