@@ -282,13 +282,46 @@ class KhinsiderAudioResolver extends AudioResolver {
   }
 
   async getAudioUrlFromVideo(video: YouTubeVideo): Promise<string | undefined> {
-    const result = await call<[string], string | null>('single_yt_url', video.id)
-    return result || undefined
+    try {
+      const html = await call<[string], string>('fetch_url', video.id)
+      if (!html) return undefined
+
+      const parser = new DOMParser()
+      const doc = parser.parseFromString(html, 'text/html')
+
+      const audio = doc.querySelector('audio')
+      if (audio) {
+        const src = audio.getAttribute('src')
+        if (src) return src
+
+        const source = audio.querySelector('source')
+        if (source) {
+          const sourceSrc = source.getAttribute('src')
+          if (sourceSrc) return sourceSrc
+        }
+      }
+
+      // Fallback: look for direct audio links
+      const links = doc.querySelectorAll('a')
+      for (const link of links) {
+        const href = link.getAttribute('href')
+        if (href && /\.(mp3|ogg|flac|m4a|wav|aac|opus)$/i.test(href)) {
+          return href.startsWith('http') ? href : `https://downloads.khinsider.com${href}`
+        }
+      }
+
+      return undefined
+    } catch (e) {
+      console.error('KHInsider audio fetch failed:', e)
+      return undefined
+    }
   }
 
   async downloadAudio(video: YouTubeVideo): Promise<boolean> {
     try {
-      await call<[string]>('download_yt_audio', video.id)
+      const url = await this.getAudioUrlFromVideo(video)
+      if (!url) return false
+      await call<[string, string]>('download_url', url, video.id)
       return true
     } catch (e) {
       console.error(e)

@@ -35,21 +35,31 @@ export default function AudioPlayer({
 
   const audioPlayer = useAudioPlayer(audioUrl)
 
-  async function getUrl() {
+  const [isPlaying, setIsPlaying] = useState(false)
+
+  useEffect(() => {
+    setIsPlaying(video.isPlaying)
+  }, [video.isPlaying])
+
+  async function getUrl(showLoading = true) {
     if (audioUrl?.length && !audioUrl.includes('youtube.com') && !audioUrl.includes('youtu.be')) return audioUrl
-    setLoading(true)
+    if (showLoading) setLoading(true)
     try {
       const resolver = getResolver(settings.useYtDlp, settings.musicProvider)
       const res = await resolver.getAudioUrlFromVideo(video)
       setAudio(res)
-      setLoading(false)
       return res
     } catch (err) {
       console.error(err)
-      setLoading(false)
       return undefined
+    } finally {
+      if (showLoading) setLoading(false)
     }
   }
+
+  useEffect(() => {
+    getUrl(false)
+  }, [video.id])
 
   useEffect(() => {
     if (audioPlayer.isReady) {
@@ -65,25 +75,29 @@ export default function AudioPlayer({
   }, [video.isPlaying, audioPlayer.isReady])
 
   async function togglePlay() {
-    const currentUrl = audioUrl || (await getUrl())
-    if (currentUrl?.length) {
-      handlePlay(!video.isPlaying)
+    const startPlaying = !isPlaying
+    setIsPlaying(startPlaying)
+    handlePlay(startPlaying)
+    if (startPlaying && !audioUrl?.length) {
+      const url = await getUrl(false)
+      if (!url?.length) {
+        setIsPlaying(false)
+        handlePlay(false)
+      }
     }
   }
 
   async function selectAudio() {
-    if (video.id.length) {
-      const currentUrl = audioUrl || (await getUrl())
-      if (currentUrl?.length) {
-        setDownloading(true)
-        await selectNewAudio({
-          title: video.title,
-          videoId: video.id,
-          audioUrl: currentUrl
-        })
-        setDownloading(false)
-      }
-    }
+    if (!video.id.length) return
+    const url = audioUrl?.length ? audioUrl : await getUrl(false)
+    if (!url?.length) return
+    setDownloading(true)
+    await selectNewAudio({
+      title: video.title,
+      videoId: video.id,
+      audioUrl: url
+    })
+    setDownloading(false)
   }
 
   return (
@@ -162,7 +176,7 @@ export default function AudioPlayer({
               disabled={loading}
               focusable={!loading}
             >
-              {video.isPlaying ? t('stop') : t('play')}
+              {isPlaying ? t('stop') : t('play')}
             </DialogButton>
             <div style={{ position: 'relative' }}>
               <DialogButton

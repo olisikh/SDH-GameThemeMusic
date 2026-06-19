@@ -1,8 +1,10 @@
 import asyncio
 import base64
 import datetime
+import glob
 import json
 import os
+import re
 import ssl
 import aiohttp
 import certifi
@@ -157,8 +159,6 @@ class Plugin:
             return ""
 
     def local_match(self, id: str) -> str | None:
-        import glob
-        
         safe_id = glob.escape(id)
         local_matches = [
             x for x in glob.glob(f"{self.music_path}/{safe_id}.*")
@@ -172,8 +172,6 @@ class Plugin:
     async def single_yt_url(self, id: str):
         if id.startswith("https://"):
             url = id
-            
-            import re
             safe_id = re.sub(r'[^a-zA-Z0-9_\-]', '_', id.split('/')[-1])
         else:
             url = f"https://www.youtube.com/watch?v={id}"
@@ -220,21 +218,9 @@ class Plugin:
         entry = json.loads(output)
         return entry["url"]
 
-    async def fetch_url(self, url: str):
-        async with aiohttp.ClientSession() as session:
-            try:
-                res = await session.get(url, ssl=self.ssl_context)
-                res.raise_for_status()
-                return await res.text()
-            except Exception as e:
-                print(f"Error fetching URL {url}: {e}")
-                return ""
-
     async def download_yt_audio(self, id: str):
         if id.startswith("https://"):
             url = id
-            
-            import re
             safe_id = re.sub(r'[^a-zA-Z0-9_\-]', '_', id.split('/')[-1])
         else:
             url = f"https://www.youtube.com/watch?v={id}"
@@ -267,18 +253,33 @@ class Plugin:
             err_msg = stderr.decode() if stderr else 'Unknown error'
             raise Exception(f"yt-dlp failed to download: {err_msg}")
 
-        original_path = os.path.join(self.music_path, f"{id}.m4a")
-        renamed_path = os.path.join(self.music_path, f"{id}.webm")
+        original_path = os.path.join(self.music_path, f"{safe_id}.m4a")
+        renamed_path = os.path.join(self.music_path, f"{safe_id}.webm")
         if os.path.exists(original_path):
             logger.info(f"Renaming {original_path} to {renamed_path}")
             os.rename(original_path, renamed_path)
 
     async def download_url(self, url: str, id: str):
         logger.info(f"Downloading file from URL: {url}")
+        
+        # Sanitize id for filesystem safety (same logic as single_yt_url/download_yt_audio)
+        if '/' in id or ':' in id:
+            safe_id = re.sub(r'[^a-zA-Z0-9_\-]', '_', id.split('/')[-1])
+        else:
+            safe_id = id
+        
+        # Try to preserve extension from URL
+        ext = 'webm'
+        url_path = url.split('?')[0]
+        if '.' in url_path:
+            url_ext = url_path.rsplit('.', 1)[-1].lower()
+            if url_ext in ['mp3', 'ogg', 'flac', 'm4a', 'wav', 'aac', 'opus', 'weba', 'mp4', 'webm']:
+                ext = url_ext
+        
         async with aiohttp.ClientSession() as session:
             res = await session.get(url, ssl=self.ssl_context)
             res.raise_for_status()
-            file_path = os.path.join(self.music_path, f"{id}.webm")
+            file_path = os.path.join(self.music_path, f"{safe_id}.{ext}")
             with open(file_path, "wb") as file:
                 async for chunk in res.content.iter_chunked(1024):
                     file.write(chunk)
