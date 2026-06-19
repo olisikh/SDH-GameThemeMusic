@@ -175,7 +175,11 @@ class Plugin:
             
         local_match = self.local_match(safe_id)
         if local_match is not None:
-            # Reverting to base64 encoding as it's the most reliable method for offline use
+            file_size = os.path.getsize(local_match)
+            if file_size > 5 * 1024 * 1024:
+                logger.warning(f"Local file too large for base64 ({file_size} bytes): {local_match}")
+                return None
+            
             extension = local_match.rsplit(".", 1)[-1].lower()
             mime_types = {
                 "m4a": "audio/mp4",
@@ -214,41 +218,60 @@ class Plugin:
     async def download_yt_audio(self, id: str):
         if id.startswith("https://"):
             url = id
-            
             safe_id = re.sub(r'[^a-zA-Z0-9_\-]', '_', id.split('/')[-1])
         else:
             url = f"https://www.youtube.com/watch?v={id}"
             safe_id = id
 
         if self.local_match(safe_id) is not None:
-            
             return
         
-        process = await asyncio.create_subprocess_exec(
-            f"{decky.DECKY_PLUGIN_DIR}/bin/yt-dlp",
-            url,
-            "-f",
-            "bestaudio[protocol^=http][protocol!*=m3u8]/bestaudio/best",
-            "-o",
-            f"{safe_id}.%(ext)s",
-            "-P",
-            self.music_path,
-            "--no-playlist",
-            "--extractor-args", "youtube:player-client=android,web",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env={**os.environ, "LD_LIBRARY_PATH": "/usr/lib:/usr/lib64:/lib:/lib64"},
-        )
+        has_ffmpeg = shutil.which("ffmpeg") is not None
+        
+        if has_ffmpeg:
+            process = await asyncio.create_subprocess_exec(
+                f"{decky.DECKY_PLUGIN_DIR}/bin/yt-dlp",
+                url,
+                "-x",
+                "--audio-format", "mp3",
+                "--audio-quality", "128K",
+                "-o",
+                f"{safe_id}.%(ext)s",
+                "-P",
+                self.music_path,
+                "--no-playlist",
+                "--extractor-args", "youtube:player-client=android,web",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env={**os.environ, "LD_LIBRARY_PATH": "/usr/lib:/usr/lib64:/lib:/lib64"},
+            )
+        else:
+            process = await asyncio.create_subprocess_exec(
+                f"{decky.DECKY_PLUGIN_DIR}/bin/yt-dlp",
+                url,
+                "-f",
+                "bestaudio[protocol^=http][protocol!*=m3u8]/bestaudio/best",
+                "-o",
+                f"{safe_id}.%(ext)s",
+                "-P",
+                self.music_path,
+                "--no-playlist",
+                "--extractor-args", "youtube:player-client=android,web",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env={**os.environ, "LD_LIBRARY_PATH": "/usr/lib:/usr/lib64:/lib:/lib64"},
+            )
         stdout, stderr = await process.communicate()
         if process.returncode != 0:
             err_msg = stderr.decode() if stderr else 'Unknown error'
             raise Exception(f"yt-dlp failed to download: {err_msg}")
 
-        original_path = os.path.join(self.music_path, f"{id}.m4a")
-        renamed_path = os.path.join(self.music_path, f"{id}.webm")
-        if os.path.exists(original_path):
-            logger.info(f"Renaming {original_path} to {renamed_path}")
-            os.rename(original_path, renamed_path)
+        if not has_ffmpeg:
+            original_path = os.path.join(self.music_path, f"{safe_id}.m4a")
+            renamed_path = os.path.join(self.music_path, f"{safe_id}.webm")
+            if os.path.exists(original_path):
+                logger.info(f"Renaming {original_path} to {renamed_path}")
+                os.rename(original_path, renamed_path)
 
     async def download_url(self, url: str, id: str):
         logger.info(f"Downloading file from URL: {url}")
