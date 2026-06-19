@@ -1,11 +1,11 @@
 {
-  "name": "SDH-GameThemeMusic",
-  "author": "olisikh",
+  "name": "Game Theme Music",
+  "author": "OMGDuke, MegalonVII",
   "flags": [],
   "api_version": 1,
   "publish": {
     "tags": ["audio"],
     "description": "Play theme songs on your game pages",
-    "image": "https://raw.githubusercontent.com/olisikh/SDH-GameThemeMusic/main/assets/publish_image.png"
+    "image": "https://raw.githubusercontent.com/MegalonVII/SDH-GameThemeMusic/main/assets/publish_image.png"
   }
 }

@@ -26,26 +26,40 @@ export default function AudioPlayer({
   }) => Promise<void>
 }) {
   const t = useTranslations()
-  // If the URL is defined already, we don't need to load anything here.
-  const [loading, setLoading] = useState(video.url === undefined)
+  const [loading, setLoading] = useState(false)
   const [downloading, setDownloading] = useState(false)
-  const [audioUrl, setAudio] = useState<string | undefined>()
-  const { settings, isLoading: settingsLoading } = useSettings()
+  const [audioUrl, setAudio] = useState<string | undefined>(
+    video.url && !video.url.includes('youtube.com') && !video.url.includes('youtu.be') ? video.url : undefined
+  )
+  const { settings } = useSettings()
 
   const audioPlayer = useAudioPlayer(audioUrl)
 
+  const [isPlaying, setIsPlaying] = useState(false)
+
   useEffect(() => {
-    async function getData() {
-      const resolver = getResolver(settings.useYtDlp)
-      setLoading(true)
+    setIsPlaying(video.isPlaying)
+  }, [video.isPlaying])
+
+  async function getUrl(showLoading = true) {
+    if (audioUrl?.length && !audioUrl.includes('youtube.com') && !audioUrl.includes('youtu.be')) return audioUrl
+    if (showLoading) setLoading(true)
+    try {
+      const resolver = getResolver(settings.useYtDlp, settings.musicProvider)
       const res = await resolver.getAudioUrlFromVideo(video)
       setAudio(res)
-      setLoading(false)
+      return res
+    } catch (err) {
+      console.error(err)
+      return undefined
+    } finally {
+      if (showLoading) setLoading(false)
     }
-    if (video.id.length && !settingsLoading) {
-      getData()
-    }
-  }, [video.id, settingsLoading])
+  }
+
+  useEffect(() => {
+    getUrl(false)
+  }, [video.id])
 
   useEffect(() => {
     if (audioPlayer.isReady) {
@@ -58,25 +72,34 @@ export default function AudioPlayer({
       if (video.isPlaying) audioPlayer.play()
       else audioPlayer.stop()
     }
-  }, [video.isPlaying])
+  }, [video.isPlaying, audioPlayer.isReady])
 
-  function togglePlay() {
-    handlePlay(!video.isPlaying)
-  }
-
-  async function selectAudio() {
-    if (audioUrl?.length && video.id.length) {
-      setDownloading(true)
-      await selectNewAudio({
-        title: video.title,
-        videoId: video.id,
-        audioUrl: audioUrl
-      })
-      setDownloading(false)
+  async function togglePlay() {
+    const startPlaying = !isPlaying
+    setIsPlaying(startPlaying)
+    handlePlay(startPlaying)
+    if (startPlaying && !audioUrl?.length) {
+      const url = await getUrl(false)
+      if (!url?.length) {
+        setIsPlaying(false)
+        handlePlay(false)
+      }
     }
   }
 
-  if (!loading && !audioUrl) return <></>
+  async function selectAudio() {
+    if (!video.id.length) return
+    const url = audioUrl?.length ? audioUrl : await getUrl(false)
+    if (!url?.length) return
+    setDownloading(true)
+    await selectNewAudio({
+      title: video.title,
+      videoId: video.id,
+      audioUrl: url
+    })
+    setDownloading(false)
+  }
+
   return (
     <div>
       <Focusable
@@ -153,7 +176,7 @@ export default function AudioPlayer({
               disabled={loading}
               focusable={!loading}
             >
-              {video.isPlaying ? t('stop') : t('play')}
+              {isPlaying ? t('stop') : t('play')}
             </DialogButton>
             <div style={{ position: 'relative' }}>
               <DialogButton
