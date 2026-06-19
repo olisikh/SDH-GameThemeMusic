@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import datetime
 import glob
 import json
@@ -95,11 +96,7 @@ class Plugin:
             "-j",
             "-f", "bestaudio",
             "--match-filters", f"duration<?{20*60}",
-            "--flat-playlist",
             "--no-playlist",
-            "--no-warnings",
-            "--no-check-certificates",
-            "--quiet",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             limit=10 * 1024**2,
@@ -161,18 +158,10 @@ class Plugin:
         safe_id = glob.escape(id)
         local_matches = [
             x for x in glob.glob(f"{self.music_path}/{safe_id}.*")
-            if os.path.isfile(x)
-            and os.path.getsize(x) > 1024
-            and x.rsplit('.', 1)[-1].lower() in ['webm', 'm4a', 'mp3', 'ogg', 'wav', 'aac', 'flac', 'opus', 'weba', 'mp4']
+            if os.path.isfile(x) and x.rsplit('.', 1)[-1].lower() in ['webm', 'm4a', 'mp3', 'ogg', 'wav', 'aac', 'flac', 'opus', 'weba', 'mp4']
         ]
         if len(local_matches) == 0:
             return None
-
-        # Prefer .m4a over .webm (old code renamed .m4a to .webm, breaking playback)
-        for ext in ['m4a', 'mp3', 'ogg', 'wav', 'aac', 'flac', 'opus', 'weba', 'mp4', 'webm']:
-            for match in local_matches:
-                if match.rsplit('.', 1)[-1].lower() == ext:
-                    return match
 
         return local_matches[0]
 
@@ -186,8 +175,24 @@ class Plugin:
             
         local_match = self.local_match(safe_id)
         if local_match is not None:
-            # Serve local file via file:// URL — avoids base64 size limits for video files
-            return f"file://{local_match}"
+            # Reverting to base64 encoding as it's the most reliable method for offline use
+            extension = local_match.rsplit(".", 1)[-1].lower()
+            mime_types = {
+                "m4a": "audio/mp4",
+                "mp3": "audio/mpeg",
+                "webm": "audio/webm",
+                "ogg": "audio/ogg",
+                "wav": "audio/wav",
+                "aac": "audio/aac",
+                "flac": "audio/flac",
+                "opus": "audio/ogg",
+                "weba": "audio/webm",
+                "mp4": "audio/mp4"
+            }
+            mime_type = mime_types.get(extension, "audio/webm")
+            
+            with open(local_match, "rb") as file:
+                return f"data:{mime_type};base64,{base64.b64encode(file.read()).decode()}"
 
         result = await asyncio.create_subprocess_exec(
             f"{decky.DECKY_PLUGIN_DIR}/bin/yt-dlp",
@@ -196,9 +201,6 @@ class Plugin:
             "-f",
             "bestaudio[protocol^=http][protocol!*=m3u8]/bestaudio/best",
             "--no-playlist",
-            "--no-warnings",
-            "--no-check-certificates",
-            "--quiet",
             "--extractor-args", "youtube:player-client=android,web",
             stdout=asyncio.subprocess.PIPE,
             env={**os.environ, 'LD_LIBRARY_PATH': '/usr/lib:/lib'},
@@ -212,12 +214,14 @@ class Plugin:
     async def download_yt_audio(self, id: str):
         if id.startswith("https://"):
             url = id
+            
             safe_id = re.sub(r'[^a-zA-Z0-9_\-]', '_', id.split('/')[-1])
         else:
             url = f"https://www.youtube.com/watch?v={id}"
             safe_id = id
 
         if self.local_match(safe_id) is not None:
+            
             return
         
         process = await asyncio.create_subprocess_exec(
@@ -230,9 +234,6 @@ class Plugin:
             "-P",
             self.music_path,
             "--no-playlist",
-            "--no-warnings",
-            "--no-check-certificates",
-            "--quiet",
             "--extractor-args", "youtube:player-client=android,web",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -243,6 +244,12 @@ class Plugin:
             err_msg = stderr.decode() if stderr else 'Unknown error'
             raise Exception(f"yt-dlp failed to download: {err_msg}")
 
+        original_path = os.path.join(self.music_path, f"{safe_id}.m4a")
+        renamed_path = os.path.join(self.music_path, f"{safe_id}.webm")
+        if os.path.exists(original_path):
+            logger.info(f"Renaming {original_path} to {renamed_path}")
+            os.rename(original_path, renamed_path)
+
     async def download_url(self, url: str, id: str):
         logger.info(f"Downloading file from URL: {url}")
         
@@ -251,13 +258,6 @@ class Plugin:
             safe_id = re.sub(r'[^a-zA-Z0-9_\-]', '_', id.split('/')[-1])
         else:
             safe_id = id
-        
-        # Remove any existing files for this ID to prevent stale/broken files
-        existing_files = glob.glob(f"{self.music_path}/{glob.escape(safe_id)}.*")
-        for f in existing_files:
-            if os.path.isfile(f):
-                logger.info(f"Removing old file before re-download: {f}")
-                os.remove(f)
         
         # Try to preserve extension from URL
         ext = 'webm'
