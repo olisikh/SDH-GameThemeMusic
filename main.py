@@ -1,5 +1,4 @@
 import asyncio
-import base64
 import datetime
 import glob
 import json
@@ -187,24 +186,8 @@ class Plugin:
             
         local_match = self.local_match(safe_id)
         if local_match is not None:
-            # Reverting to base64 encoding as it's the most reliable method for offline use
-            extension = local_match.rsplit(".", 1)[-1].lower()
-            mime_types = {
-                "m4a": "audio/mp4",
-                "mp3": "audio/mpeg",
-                "webm": "audio/webm",
-                "ogg": "audio/ogg",
-                "wav": "audio/wav",
-                "aac": "audio/aac",
-                "flac": "audio/flac",
-                "opus": "audio/ogg",
-                "weba": "audio/webm",
-                "mp4": "audio/mp4"
-            }
-            mime_type = mime_types.get(extension, "audio/webm")
-            
-            with open(local_match, "rb") as file:
-                return f"data:{mime_type};base64,{base64.b64encode(file.read()).decode()}"
+            # Serve local file via file:// URL — avoids base64 size limits for video files
+            return f"file://{local_match}"
 
         result = await asyncio.create_subprocess_exec(
             f"{decky.DECKY_PLUGIN_DIR}/bin/yt-dlp",
@@ -234,12 +217,8 @@ class Plugin:
             url = f"https://www.youtube.com/watch?v={id}"
             safe_id = id
 
-        # Remove any existing files for this ID to prevent stale/broken files
-        existing_files = glob.glob(f"{self.music_path}/{glob.escape(safe_id)}.*")
-        for f in existing_files:
-            if os.path.isfile(f):
-                logger.info(f"Removing old file before re-download: {f}")
-                os.remove(f)
+        if self.local_match(safe_id) is not None:
+            return
         
         process = await asyncio.create_subprocess_exec(
             f"{decky.DECKY_PLUGIN_DIR}/bin/yt-dlp",
