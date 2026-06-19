@@ -1,10 +1,10 @@
 import { DialogButton, Focusable } from '@decky/ui'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { toaster } from '@decky/api'
 import useTranslations from '../../hooks/useTranslations'
 import { getResolver } from '../../actions/audio'
 import { YouTubeVideoPreview } from '../../../types/YouTube'
-import { FaCheck } from 'react-icons/fa'
-import Spinner from '../spinner'
+import { FaCheck, FaExclamationTriangle } from 'react-icons/fa'
 import useAudioPlayer from '../../hooks/useAudioPlayer'
 import { useSettings } from '../../hooks/useSettings'
 
@@ -26,7 +26,7 @@ export default function AudioPlayer({
   }) => Promise<void>
 }) {
   const t = useTranslations()
-  const [loading, setLoading] = useState(false)
+  const [fetching, setFetching] = useState(false)
   const [downloading, setDownloading] = useState(false)
   const [audioUrl, setAudio] = useState<string | undefined>(
     video.url && !video.url.includes('youtube.com') && !video.url.includes('youtu.be') ? video.url : undefined
@@ -36,6 +36,7 @@ export default function AudioPlayer({
   const audioPlayer = useAudioPlayer(audioUrl)
 
   const [isPlaying, setIsPlaying] = useState(false)
+  const fetchIdRef = useRef(0)
 
   useEffect(() => {
     setIsPlaying(video.isPlaying)
@@ -43,16 +44,13 @@ export default function AudioPlayer({
 
   async function getUrl() {
     if (audioUrl?.length && !audioUrl.includes('youtube.com') && !audioUrl.includes('youtu.be')) return audioUrl
-    setLoading(true)
     try {
       const resolver = getResolver(settings.useYtDlp, settings.musicProvider)
       const res = await resolver.getAudioUrlFromVideo(video)
       setAudio(res)
-      setLoading(false)
       return res
     } catch (err) {
       console.error(err)
-      setLoading(false)
       return undefined
     }
   }
@@ -72,11 +70,24 @@ export default function AudioPlayer({
     const startPlaying = !isPlaying
     setIsPlaying(startPlaying)
     if (startPlaying) {
-      const url = audioUrl || (await getUrl())
-      if (url?.length) {
-        handlePlay(true)
-      } else {
-        setIsPlaying(false)
+      const id = ++fetchIdRef.current
+      setFetching(true)
+      try {
+        const url = audioUrl || (await getUrl())
+        if (id !== fetchIdRef.current) return
+        if (url?.length) {
+          handlePlay(true)
+        } else {
+          setIsPlaying(false)
+          toaster.toast({
+            title: t('playbackFailed'),
+            body: t('playbackFailedDetail'),
+            icon: <FaExclamationTriangle />,
+            duration: 3000
+          })
+        }
+      } finally {
+        setFetching(false)
       }
     } else {
       handlePlay(false)
@@ -84,17 +95,31 @@ export default function AudioPlayer({
   }
 
   async function selectAudio() {
-    if (video.id.length) {
-      const currentUrl = audioUrl || (await getUrl())
-      if (currentUrl?.length) {
-        setDownloading(true)
+    if (!video.id.length) return
+    setFetching(true)
+    try {
+      const url = audioUrl || (await getUrl())
+      if (!url?.length) {
+        toaster.toast({
+          title: t('playbackFailed'),
+          body: t('playbackFailedDetail'),
+          icon: <FaExclamationTriangle />,
+          duration: 3000
+        })
+        return
+      }
+      setDownloading(true)
+      try {
         await selectNewAudio({
           title: video.title,
           videoId: video.id,
-          audioUrl: currentUrl
+          audioUrl: url
         })
+      } finally {
         setDownloading(false)
       }
+    } finally {
+      setFetching(false)
     }
   }
 
@@ -147,71 +172,58 @@ export default function AudioPlayer({
           {video.title}
         </p>
 
-        {loading || downloading ? (
-          <div
-            style={{
-              height: '85px',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center'
-            }}
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '6px',
+            width: '230px'
+          }}
+        >
+          <DialogButton
+            onClick={togglePlay}
+            disabled={fetching}
+            focusable={true}
           >
-            {downloading && <div>Downloading...</div>}
-            <Spinner />
-          </div>
-        ) : (
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '6px',
-              width: '230px'
-            }}
-          >
+            {isPlaying ? t('stop') : t('play')}
+          </DialogButton>
+          <div style={{ position: 'relative' }}>
             <DialogButton
-              onClick={togglePlay}
-              disabled={loading}
-              focusable={!loading}
+              disabled={selected || downloading || fetching}
+              focusable={!selected && !downloading}
+              onClick={selectAudio}
             >
-              {isPlaying ? t('stop') : t('play')}
-            </DialogButton>
-            <div style={{ position: 'relative' }}>
-              <DialogButton
-                disabled={selected || loading}
-                focusable={!selected && !loading}
-                onClick={selectAudio}
-              >
-                {selected
-                  ? t('selected')
+              {selected
+                ? t('selected')
+                : downloading
+                  ? t('downloading')
                   : settings.downloadAudio
                     ? t('download')
                     : t('select')}
-              </DialogButton>
-              {selected ? (
-                <div
-                  style={{
-                    height: '20px',
-                    width: '20px',
-                    position: 'absolute',
-                    bottom: '-6px',
-                    right: '-6px',
-                    background: '#59bf40',
-                    borderRadius: '50%',
-                    color: 'white',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center'
-                  }}
-                >
-                  <FaCheck />
-                </div>
-              ) : (
-                ''
-              )}
-            </div>
+            </DialogButton>
+            {selected ? (
+              <div
+                style={{
+                  height: '20px',
+                  width: '20px',
+                  position: 'absolute',
+                  bottom: '-6px',
+                  right: '-6px',
+                  background: '#59bf40',
+                  borderRadius: '50%',
+                  color: 'white',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                <FaCheck />
+              </div>
+            ) : (
+              ''
+            )}
           </div>
-        )}
+        </div>
       </Focusable>
     </div>
   )
