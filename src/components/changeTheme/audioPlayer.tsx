@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { toaster } from '@decky/api'
 import useTranslations from '../../hooks/useTranslations'
 import { getResolver } from '../../actions/audio'
-import { YouTubeVideoPreview } from '../../../types/YouTube'
+import { MediaContentPreview } from 'types'
 import { FaCheck, FaExclamationTriangle } from 'react-icons/fa'
 import useAudioPlayer from '../../hooks/useAudioPlayer'
 import { useSettings } from '../../hooks/useSettings'
@@ -15,7 +15,7 @@ export default function AudioPlayer({
   video,
   volume
 }: {
-  video: YouTubeVideoPreview & { isPlaying: boolean }
+  video: MediaContentPreview & { isPlaying: boolean }
   volume: number
   handlePlay: (startPlaying: boolean) => void
   selected: boolean

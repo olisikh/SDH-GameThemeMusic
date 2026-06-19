@@ -5,20 +5,25 @@ import useTranslations from '../../hooks/useTranslations'
 import ChangePage from './changePage'
 import AboutPage from './aboutPage'
 import { getResolver } from '../../actions/audio'
-import { YouTubeVideoPreview } from '../../../types/YouTube'
+import { MediaContentPreview } from '../../../types/types'
 import GameSettings from './gameSettings'
 import { useSettings } from '../../hooks/useSettings'
 
 export default function ChangeTheme() {
   const [currentTab, setCurrentTab] = useState<string>('change-music-tab')
   const t = useTranslations()
-  const { settings, isLoading: settingsLoading, setMusicProvider } = useSettings()
+  const {
+    settings,
+    isLoading: settingsLoading,
+    setMusicProvider
+  } = useSettings()
+
   const { appid } = useParams<{ appid: string }>()
   const appDetails = appStore.GetAppOverviewByGameID(parseInt(appid))
   const appName = appDetails?.display_name?.replace(/(™|®|©)/g, '')
 
   const [videos, setVideos] = useState<
-    (YouTubeVideoPreview & { isPlaying: boolean })[]
+    (MediaContentPreview & { isPlaying: boolean })[]
   >([])
   const [loadingNum, setLoadingNum] = useState(0)
 
@@ -38,7 +43,10 @@ export default function ChangeTheme() {
 
     if (settings.musicProvider === 'khinsider' && searchTerm === ytDefault) {
       setSearchTerm(khDefault)
-    } else if (settings.musicProvider === 'youtube' && searchTerm === khDefault) {
+    } else if (
+      settings.musicProvider === 'youtube' &&
+      searchTerm === khDefault
+    ) {
       setSearchTerm(ytDefault)
     } else if (!searchTerm) {
       setSearchTerm(getInitialSearch())

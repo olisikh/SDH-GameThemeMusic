@@ -1,11 +1,11 @@
-export type YouTubeVideo = { id: string; url?: string }
+export type MediaContent = { id: string; url?: string }
 
-export type YouTubeVideoPreview = YouTubeVideo & {
+export type MediaContentPreview = MediaContent & {
   title: string
   thumbnail: string
 }
 
-export type YouTubeInitialData = {
+export type YouTubeVideoData = {
   title: string
   videoId: string
   videoThumbnails: { quality: string; url: string }[]
