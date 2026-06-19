@@ -96,6 +96,7 @@ export default function AudioPlayer({
 
   async function selectAudio() {
     if (!video.id.length) return
+    setDownloading(true)
     setFetching(true)
     try {
       const url = audioUrl || (await getUrl())
@@ -108,18 +109,14 @@ export default function AudioPlayer({
         })
         return
       }
-      setDownloading(true)
-      try {
-        await selectNewAudio({
-          title: video.title,
-          videoId: video.id,
-          audioUrl: url
-        })
-      } finally {
-        setDownloading(false)
-      }
+      await selectNewAudio({
+        title: video.title,
+        videoId: video.id,
+        audioUrl: url
+      })
     } finally {
       setFetching(false)
+      setDownloading(false)
     }
   }
 

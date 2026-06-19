@@ -162,10 +162,18 @@ class Plugin:
         safe_id = glob.escape(id)
         local_matches = [
             x for x in glob.glob(f"{self.music_path}/{safe_id}.*")
-            if os.path.isfile(x) and x.rsplit('.', 1)[-1].lower() in ['webm', 'm4a', 'mp3', 'ogg', 'wav', 'aac', 'flac', 'opus', 'weba', 'mp4']
+            if os.path.isfile(x)
+            and os.path.getsize(x) > 1024
+            and x.rsplit('.', 1)[-1].lower() in ['webm', 'm4a', 'mp3', 'ogg', 'wav', 'aac', 'flac', 'opus', 'weba', 'mp4']
         ]
         if len(local_matches) == 0:
             return None
+
+        # Prefer .m4a over .webm (old code renamed .m4a to .webm, breaking playback)
+        for ext in ['m4a', 'mp3', 'ogg', 'wav', 'aac', 'flac', 'opus', 'weba', 'mp4', 'webm']:
+            for match in local_matches:
+                if match.rsplit('.', 1)[-1].lower() == ext:
+                    return match
 
         return local_matches[0]
 
@@ -226,9 +234,12 @@ class Plugin:
             url = f"https://www.youtube.com/watch?v={id}"
             safe_id = id
 
-        if self.local_match(safe_id) is not None:
-            
-            return
+        # Remove any existing files for this ID to prevent stale/broken files
+        existing_files = glob.glob(f"{self.music_path}/{glob.escape(safe_id)}.*")
+        for f in existing_files:
+            if os.path.isfile(f):
+                logger.info(f"Removing old file before re-download: {f}")
+                os.remove(f)
         
         process = await asyncio.create_subprocess_exec(
             f"{decky.DECKY_PLUGIN_DIR}/bin/yt-dlp",
@@ -261,6 +272,13 @@ class Plugin:
             safe_id = re.sub(r'[^a-zA-Z0-9_\-]', '_', id.split('/')[-1])
         else:
             safe_id = id
+        
+        # Remove any existing files for this ID to prevent stale/broken files
+        existing_files = glob.glob(f"{self.music_path}/{glob.escape(safe_id)}.*")
+        for f in existing_files:
+            if os.path.isfile(f):
+                logger.info(f"Removing old file before re-download: {f}")
+                os.remove(f)
         
         # Try to preserve extension from URL
         ext = 'webm'
