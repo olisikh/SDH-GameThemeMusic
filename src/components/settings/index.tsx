@@ -47,7 +47,8 @@ export default function Index() {
     setUseYtDlp,
     setDownloadAudio,
     setInvidiousInstance,
-    setVolume
+    setVolume,
+    setMusicProvider
   } = useSettings()
 
   const t = useTranslations()
@@ -171,6 +172,19 @@ export default function Index() {
   return (
     <div>
       <PanelSection title={t('settings')}>
+        <PanelSectionRow>
+          <DropdownItem
+            label={t('musicProvider')}
+            description={t('musicProviderDescription')}
+            menuLabel={t('musicProvider')}
+            rgOptions={[
+              { data: 'youtube', label: 'YouTube' },
+              { data: 'khinsider', label: 'KHInsider' }
+            ]}
+            selectedOption={settings.musicProvider || 'youtube'}
+            onChange={(newVal: any) => setMusicProvider(newVal.data)}
+          />
+        </PanelSectionRow>
         <PanelSectionRow>
           <SliderField
             label={t('volume')}

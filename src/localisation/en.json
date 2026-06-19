@@ -60,5 +60,7 @@
     "useYtDlp": "Use yt-dlp",
     "useYtDlpDescription": "Access YouTube directly without Invidious",
     "volume": "Music Volume",
-    "volumeDescription": "Adjust music volume"
+    "volumeDescription": "Adjust music volume",
+    "musicProvider": "Music Provider",
+    "musicProviderDescription": "Where to look for music (YouTube or KHInsider)"
 }
