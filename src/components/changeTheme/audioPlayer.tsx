@@ -42,14 +42,18 @@ export default function AudioPlayer({
       const resolver = getResolver(settings.useYtDlp, settings.musicProvider)
       const res = await resolver.getAudioUrlFromVideo(video)
       setAudio(res)
-      setLoading(false)
       return res
     } catch (err) {
       console.error(err)
-      setLoading(false)
       return undefined
+    } finally {
+      setLoading(false)
     }
   }
+
+  useEffect(() => {
+    if (!audioUrl) getUrl()
+  }, [video.id])
 
   useEffect(() => {
     if (audioPlayer.isReady) {
@@ -64,25 +68,21 @@ export default function AudioPlayer({
     }
   }, [video.isPlaying, audioPlayer.isReady])
 
-  async function togglePlay() {
-    const currentUrl = audioUrl || (await getUrl())
-    if (currentUrl?.length) {
+  function togglePlay() {
+    if (audioUrl?.length) {
       handlePlay(!video.isPlaying)
     }
   }
 
   async function selectAudio() {
-    if (video.id.length) {
-      const currentUrl = audioUrl || (await getUrl())
-      if (currentUrl?.length) {
-        setDownloading(true)
-        await selectNewAudio({
-          title: video.title,
-          videoId: video.id,
-          audioUrl: currentUrl
-        })
-        setDownloading(false)
-      }
+    if (video.id.length && audioUrl?.length) {
+      setDownloading(true)
+      await selectNewAudio({
+        title: video.title,
+        videoId: video.id,
+        audioUrl: audioUrl
+      })
+      setDownloading(false)
     }
   }
 
