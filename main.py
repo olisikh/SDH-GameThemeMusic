@@ -195,12 +195,8 @@ class Plugin:
             }
             mime_type = mime_types.get(extension, "audio/webm")
             
-            def _encode_file(path: str) -> str:
-                with open(path, "rb") as f:
-                    return base64.b64encode(f.read()).decode()
-            
-            encoded = await asyncio.to_thread(_encode_file, local_match)
-            return f"data:{mime_type};base64,{encoded}"
+            with open(local_match, "rb") as file:
+                return f"data:{mime_type};base64,{base64.b64encode(file.read()).decode()}"
 
         result = await asyncio.create_subprocess_exec(
             f"{decky.DECKY_PLUGIN_DIR}/bin/yt-dlp",
@@ -256,12 +252,6 @@ class Plugin:
         if process.returncode != 0:
             err_msg = stderr.decode() if stderr else 'Unknown error'
             raise Exception(f"yt-dlp failed to download: {err_msg}")
-
-        original_path = os.path.join(self.music_path, f"{safe_id}.m4a")
-        renamed_path = os.path.join(self.music_path, f"{safe_id}.webm")
-        if os.path.exists(original_path):
-            logger.info(f"Renaming {original_path} to {renamed_path}")
-            os.rename(original_path, renamed_path)
 
     async def download_url(self, url: str, id: str):
         logger.info(f"Downloading file from URL: {url}")
