@@ -20,10 +20,42 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def mk_audio_filename(id: str) -> str:
-    if id.startswith("https://"):
-        return hashlib.md5(id.encode()).hexdigest()
-    return id
+MIME_TYPES = {
+    "m4a": "audio/mp4",
+    "mp3": "audio/mpeg",
+    "webm": "audio/webm",
+    "ogg": "audio/ogg",
+    "wav": "audio/wav",
+    "aac": "audio/aac",
+    "flac": "audio/flac",
+    "opus": "audio/ogg",
+    "weba": "audio/webm",
+    "mp4": "audio/mp4"
+}
+
+PLAYABLE_EXTENSIONS = list(MIME_TYPES.keys())
+
+
+def provider_file_key(provider: str, track_id: str) -> str:
+    if provider == "youtube":
+        return f"youtube_{track_id}"
+    if provider == "khinsider":
+        return f"khinsider_{hashlib.md5(track_id.encode()).hexdigest()}"
+    return hashlib.md5(f"{provider}:{track_id}".encode()).hexdigest()
+
+
+def legacy_file_keys(provider: str, track_id: str) -> list[str]:
+    keys: list[str] = []
+    if provider == "youtube":
+        keys.append(track_id)
+    if provider == "khinsider":
+        keys.append(hashlib.md5(track_id.encode()).hexdigest())
+    return keys
+
+
+def extension_for_url(url: str) -> str:
+    ext = url.rsplit('.', 1)[-1].split('?', 1)[0].lower()
+    return ext if ext in PLAYABLE_EXTENSIONS else 'webm'
 
 
 def get_ytdlp_path() -> str:
@@ -168,37 +200,60 @@ class Plugin:
         safe_id = glob.escape(id)
         local_matches = [
             x for x in glob.glob(f"{self.music_path}/{safe_id}.*")
-            if os.path.isfile(x) and x.rsplit('.', 1)[-1].lower() in ['webm', 'm4a', 'mp3', 'ogg', 'wav', 'aac', 'flac', 'opus', 'weba', 'mp4']
+            if os.path.isfile(x) and x.rsplit('.', 1)[-1].lower() in PLAYABLE_EXTENSIONS
         ]
         if len(local_matches) == 0:
             return None
 
         return local_matches[0]
 
-    async def local_audio_url(self, id: str):
-        safe_id = mk_audio_filename(id)
-        local_match = self.local_match(safe_id)
+    def provider_local_match(self, provider: str, track_id: str) -> tuple[str, str] | None:
+        file_key = provider_file_key(provider, track_id)
+        local_match = self.local_match(file_key)
+        if local_match is not None:
+            return file_key, local_match
+
+        for legacy_key in legacy_file_keys(provider, track_id):
+            local_match = self.local_match(legacy_key)
+            if local_match is not None:
+                return legacy_key, local_match
+
+        return None
+
+    def stored_music_file_from_path(self, file_key: str, path: str):
+        extension = path.rsplit(".", 1)[-1].lower()
+        return {
+            "fileKey": file_key,
+            "extension": extension,
+            "mimeType": MIME_TYPES.get(extension, "audio/webm"),
+            "fileSize": os.path.getsize(path)
+        }
+
+    async def get_stored_music_file(self, provider: str, track_id: str):
+        local_match = self.provider_local_match(provider, track_id)
         if local_match is None:
             return None
+        file_key, path = local_match
+        return self.stored_music_file_from_path(file_key, path)
 
-        file_size = os.path.getsize(local_match)
-        extension = local_match.rsplit(".", 1)[-1].lower()
-        mime_types = {
-            "m4a": "audio/mp4",
-            "mp3": "audio/mpeg",
-            "webm": "audio/webm",
-            "ogg": "audio/ogg",
-            "wav": "audio/wav",
-            "aac": "audio/aac",
-            "flac": "audio/flac",
-            "opus": "audio/ogg",
-            "weba": "audio/webm",
-            "mp4": "audio/mp4"
-        }
-        mime_type = mime_types.get(extension, "audio/webm")
-        logger.info(f"Serving local audio as base64: {local_match} ({file_size} bytes)")
-        with open(local_match, "rb") as file:
+    def serve_local_file(self, path: str):
+        file_size = os.path.getsize(path)
+        extension = path.rsplit(".", 1)[-1].lower()
+        mime_type = MIME_TYPES.get(extension, "audio/webm")
+        logger.info(f"Serving local audio as base64: {path} ({file_size} bytes)")
+        with open(path, "rb") as file:
             return f"data:{mime_type};base64,{base64.b64encode(file.read()).decode()}"
+
+    async def stored_music_url(self, provider: str, track_id: str):
+        local_match = self.provider_local_match(provider, track_id)
+        if local_match is None:
+            return None
+        _, path = local_match
+        return self.serve_local_file(path)
+
+    async def local_audio_url(self, id: str):
+        provider = "khinsider" if id.startswith("https://downloads.khinsider.com/") else "youtube"
+        return await self.stored_music_url(provider, id)
 
     async def single_yt_url(self, id: str):
         if id.startswith("https://"):
@@ -206,28 +261,11 @@ class Plugin:
         else:
             url = f"https://www.youtube.com/watch?v={id}"
 
-        safe_id = mk_audio_filename(id)
-        local_match = self.local_match(safe_id)
+        local_match = self.provider_local_match("youtube", id)
 
         if local_match is not None:
-            file_size = os.path.getsize(local_match)
-            extension = local_match.rsplit(".", 1)[-1].lower()
-            mime_types = {
-                "m4a": "audio/mp4",
-                "mp3": "audio/mpeg",
-                "webm": "audio/webm",
-                "ogg": "audio/ogg",
-                "wav": "audio/wav",
-                "aac": "audio/aac",
-                "flac": "audio/flac",
-                "opus": "audio/ogg",
-                "weba": "audio/webm",
-                "mp4": "audio/mp4"
-            }
-            mime_type = mime_types.get(extension, "audio/webm")
-            logger.info(f"Serving local audio as base64: {local_match} ({file_size} bytes)")
-            with open(local_match, "rb") as file:
-                return f"data:{mime_type};base64,{base64.b64encode(file.read()).decode()}"
+            _, path = local_match
+            return self.serve_local_file(path)
 
         result = await asyncio.create_subprocess_exec(
             f"{decky.DECKY_PLUGIN_DIR}/bin/yt-dlp",
@@ -254,9 +292,12 @@ class Plugin:
         else:
             url = f"https://www.youtube.com/watch?v={id}"
 
-        safe_id = mk_audio_filename(id)
-        if self.local_match(safe_id) is not None:
-            return
+        existing = self.provider_local_match("youtube", id)
+        if existing is not None:
+            file_key, path = existing
+            return self.stored_music_file_from_path(file_key, path)
+
+        safe_id = provider_file_key("youtube", id)
 
         has_ffmpeg = shutil.which("ffmpeg") is not None
 
@@ -312,16 +353,21 @@ class Plugin:
         local_file = self.local_match(safe_id)
         if local_file is not None:
             logger.info(f"Downloaded audio: {local_file} ({os.path.getsize(local_file)} bytes), ffmpeg={has_ffmpeg}")
+            return self.stored_music_file_from_path(safe_id, local_file)
         else:
             logger.warning(f"Download completed but no output file found for {safe_id}")
+            return None
 
     async def download_url(self, url: str, id: str):
         logger.info(f"Downloading file from URL: {url} for id {id}")
 
-        safe_id = mk_audio_filename(id)
-        ext = url.rsplit('.', 1)[-1].lower()
-        if ext not in ['mp3', 'ogg', 'flac', 'm4a', 'wav', 'aac', 'opus', 'webm', 'mp4']:
-            ext = 'webm'
+        existing = self.provider_local_match("khinsider", id)
+        if existing is not None:
+            file_key, path = existing
+            return self.stored_music_file_from_path(file_key, path)
+
+        safe_id = provider_file_key("khinsider", id)
+        ext = extension_for_url(url)
 
         try:
             async with aiohttp.ClientSession() as session:
@@ -337,6 +383,7 @@ class Plugin:
                     async for chunk in res.content.iter_chunked(1024):
                         file.write(chunk)
                 logger.info(f"Download complete: {file_path}")
+                return self.stored_music_file_from_path(safe_id, file_path)
         except Exception as e:
             logger.error(f"download_url failed for {url}: {e}")
             raise

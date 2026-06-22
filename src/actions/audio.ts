@@ -1,5 +1,5 @@
 import { call } from '@decky/api'
-import { MediaContent, MediaContentPreview } from 'types/media'
+import { MediaContent, MediaContentPreview, StoredMusicFile } from 'types/media'
 
 abstract class AudioResolver {
   abstract getYouTubeSearchResults(
@@ -8,14 +8,16 @@ abstract class AudioResolver {
   abstract getAudioUrlFromVideo(
     video: MediaContent
   ): Promise<string | undefined>
-  abstract downloadAudio(video: MediaContent): Promise<boolean>
+  abstract getPreviewUrl(video: MediaContent): Promise<string | undefined>
+  abstract getLocalAudioUrl(video: MediaContent): Promise<string | undefined>
+  abstract downloadAudio(video: MediaContent): Promise<StoredMusicFile | undefined>
 
   async getAudio(
     appName: string
   ): Promise<{ videoId: string; audioUrl: string } | undefined> {
     const videos = this.getYouTubeSearchResults(appName + ' Theme Music')
     for await (const video of videos) {
-      const audioUrl = await this.getAudioUrlFromVideo(video)
+      const audioUrl = await this.getPreviewUrl(video)
       if (audioUrl?.length) {
         return { audioUrl, videoId: video.id }
       }
@@ -43,6 +45,10 @@ class YtDlpAudioResolver extends AudioResolver {
   }
 
   async getAudioUrlFromVideo(video: MediaContent): Promise<string | undefined> {
+    return this.getPreviewUrl(video)
+  }
+
+  async getPreviewUrl(video: MediaContent): Promise<string | undefined> {
     if (video.url && !video.url.includes('youtube.com') && !video.url.includes('youtu.be')) {
       return video.url
     } else {
@@ -54,13 +60,21 @@ class YtDlpAudioResolver extends AudioResolver {
     }
   }
 
-  async downloadAudio(video: MediaContent): Promise<boolean> {
+  async getLocalAudioUrl(video: MediaContent): Promise<string | undefined> {
+    const result = await call<[string, string], string | null>(
+      'stored_music_url',
+      'youtube',
+      video.id
+    )
+    return result || undefined
+  }
+
+  async downloadAudio(video: MediaContent): Promise<StoredMusicFile | undefined> {
     try {
-      await call<[string]>('download_yt_audio', video.id)
-      return true
+      return await call<[string], StoredMusicFile | undefined>('download_yt_audio', video.id)
     } catch (e) {
       console.error(e)
-      return false
+      return undefined
     }
   }
 }
@@ -186,9 +200,19 @@ class KhinsiderAudioResolver extends AudioResolver {
   }
 
   async getAudioUrlFromVideo(video: MediaContent): Promise<string | undefined> {
-    const localUrl = await call<[string], string | null>('local_audio_url', video.id)
-    if (localUrl) return localUrl
+    return (await this.getLocalAudioUrl(video)) || this.getPreviewUrl(video)
+  }
 
+  async getLocalAudioUrl(video: MediaContent): Promise<string | undefined> {
+    const localUrl = await call<[string, string], string | null>(
+      'stored_music_url',
+      'khinsider',
+      video.id
+    )
+    return localUrl || undefined
+  }
+
+  async getPreviewUrl(video: MediaContent): Promise<string | undefined> {
     try {
       const html = await call<[string], string>('fetch_url', video.id)
       if (!html) return undefined
@@ -226,15 +250,14 @@ class KhinsiderAudioResolver extends AudioResolver {
     }
   }
 
-  async downloadAudio(video: MediaContent): Promise<boolean> {
+  async downloadAudio(video: MediaContent): Promise<StoredMusicFile | undefined> {
     try {
-      const url = await this.getAudioUrlFromVideo(video)
-      if (!url) return false
-      await call<[string, string]>('download_url', url, video.id)
-      return true
+      const url = await this.getPreviewUrl(video)
+      if (!url) return undefined
+      return await call<[string, string], StoredMusicFile | undefined>('download_url', url, video.id)
     } catch (e) {
       console.error(e)
-      return false
+      return undefined
     }
   }
 }

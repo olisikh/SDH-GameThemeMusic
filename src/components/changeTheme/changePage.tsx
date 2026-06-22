@@ -13,9 +13,9 @@ import SteamSpinner from '../steamSpinner'
 import { useEffect, useState } from 'react'
 import { Settings } from '../../hooks/useSettings'
 import AudioPlayer from './audioPlayer'
-import { getCache, updateCache } from '../../cache/musicCache'
+import { getCache, normalizeAssignment, updateAssignment } from '../../cache/musicCache'
 import useTranslations from '../../hooks/useTranslations'
-import { MediaContentPreview } from 'types/media'
+import { MediaContentPreview, Provider, TrackAssignment } from 'types/media'
 import NoMusic from './noMusic'
 import { getResolver } from '../../actions/audio'
 
@@ -42,7 +42,7 @@ export default function ChangePage({
   const { appid } = useParams<{ appid: string }>()
   const appDetails = appStore.GetAppOverviewByGameID(parseInt(appid))
   const appName = appDetails?.display_name?.replace(/(™|®|©)/g, '')
-  const [selected, setSelected] = useState<string | undefined>()
+  const [selected, setSelected] = useState<TrackAssignment | undefined>()
   const [searchTerm, setSearchTerm] = useState(currentSearch)
 
   useEffect(() => {
@@ -52,7 +52,7 @@ export default function ChangePage({
   useEffect(() => {
     async function getData() {
       const cache = await getCache(parseInt(appid))
-      setSelected(cache?.videoId)
+      setSelected(normalizeAssignment(cache))
     }
     getData()
   }, [appid])
@@ -62,11 +62,19 @@ export default function ChangePage({
     videoId: string
     audioUrl: string
   }) {
-    const success = await getResolver(settings.musicProvider).downloadAudio({
+    if (audio.videoId === '') {
+      const assignment: TrackAssignment = { kind: 'none' }
+      setSelected(assignment)
+      updateAssignment(parseInt(appid), assignment)
+      return
+    }
+
+    const provider = (settings.musicProvider || 'youtube') as Provider
+    const storedFile = await getResolver(provider).downloadAudio({
       id: audio.videoId,
       url: audio.audioUrl
     })
-    if (!success) {
+    if (!storedFile) {
       showModal(
         <ModalRoot>{t('downloadFailedDetail')}</ModalRoot>,
         undefined,
@@ -74,8 +82,19 @@ export default function ChangePage({
       )
       return
     }
-    setSelected(audio.videoId)
-    updateCache(parseInt(appid), { videoId: audio.videoId })
+    const assignment: TrackAssignment = {
+      kind: 'track',
+      provider,
+      trackId: audio.videoId,
+      fileKey: storedFile.fileKey,
+      title: audio.title,
+      extension: storedFile.extension,
+      mimeType: storedFile.mimeType,
+      fileSize: storedFile.fileSize,
+      downloadedAt: new Date().toISOString()
+    }
+    setSelected(assignment)
+    updateAssignment(parseInt(appid), assignment)
   }
 
   return (
@@ -148,7 +167,7 @@ export default function ChangePage({
             }}
           >
             <NoMusic
-              selected={selected === ''}
+              selected={selected?.kind === 'none'}
               selectNewAudio={selectNewAudio}
             />
             {videos.map((video, index) => (
@@ -159,7 +178,11 @@ export default function ChangePage({
                 handlePlay={(status) => {
                   handlePlay(index, status)
                 }}
-                selected={selected === video.id}
+                selected={
+                  selected?.kind === 'track' &&
+                  selected.provider === settings.musicProvider &&
+                  selected.trackId === video.id
+                }
                 selectNewAudio={selectNewAudio}
               />
             ))}
