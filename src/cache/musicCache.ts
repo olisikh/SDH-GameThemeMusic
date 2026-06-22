@@ -1,5 +1,6 @@
 import { call } from '@decky/api'
 import localforage from 'localforage'
+import { Provider, TrackAssignment } from 'types/media'
 
 const STORAGE_KEY = 'game-theme-music-cache'
 
@@ -8,6 +9,7 @@ localforage.config({
 })
 
 type GameThemeMusicCache = {
+  assignment?: TrackAssignment
   videoId?: string | undefined
   volume?: number
 }
@@ -23,6 +25,34 @@ export async function updateCache(appId: number, newData: GameThemeMusicCache) {
     ...newData
   })
   return newCache
+}
+
+function inferProvider(trackId: string): Provider {
+  return trackId.startsWith('https://downloads.khinsider.com/')
+    ? 'khinsider'
+    : 'youtube'
+}
+
+export function normalizeAssignment(
+  cache: GameThemeMusicCache | null | undefined
+): TrackAssignment | undefined {
+  if (!cache) return undefined
+  if (cache.assignment) return cache.assignment
+  if (cache.videoId === '') return { kind: 'none' }
+  if (cache.videoId?.length) {
+    const provider = inferProvider(cache.videoId)
+    return {
+      kind: 'track',
+      provider,
+      trackId: cache.videoId,
+      fileKey: ''
+    }
+  }
+  return undefined
+}
+
+export async function updateAssignment(appId: number, assignment: TrackAssignment) {
+  return updateCache(appId, { assignment })
 }
 
 export async function getFullCache(): Promise<GameThemeMusicCacheMapping> {

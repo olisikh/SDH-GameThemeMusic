@@ -28,7 +28,9 @@ import {
   exportCache,
   getFullCache,
   importCache,
-  listCacheBackups
+  listCacheBackups,
+  normalizeAssignment,
+  updateAssignment
 } from '../../cache/musicCache'
 import { toaster, call } from '@decky/api'
 import { getResolver } from '../../actions/audio'
@@ -128,14 +130,30 @@ export default function Index() {
       )
     }
 
-    const cached = Object.values(await getFullCache())
-    const resolver = getResolver(settings.musicProvider)
+    const cached = Object.entries(await getFullCache())
 
     for (let index = 0; index < cached.length; index++) {
-      const element = cached[index]
-      if (element.videoId !== undefined) {
+      const [appId, element] = cached[index]
+      const assignment = normalizeAssignment(element)
+      if (assignment?.kind === 'track') {
         modal.Update(getProgressModal(index, cached.length))
-        await resolver.downloadAudio({ id: element.videoId })
+        const storedFile = await getResolver(assignment.provider).downloadAudio({ id: assignment.trackId })
+        if (storedFile) {
+          await updateAssignment(parseInt(appId), {
+            ...assignment,
+            fileKey: storedFile.fileKey,
+            extension: storedFile.extension,
+            mimeType: storedFile.mimeType,
+            fileSize: storedFile.fileSize,
+            downloadedAt: new Date().toISOString(),
+            lastDownloadError: undefined
+          })
+        } else {
+          await updateAssignment(parseInt(appId), {
+            ...assignment,
+            lastDownloadError: 'download failed'
+          })
+        }
       }
     }
     modal.Close()

@@ -6,7 +6,7 @@ import {
   useParams
 } from '@decky/ui'
 import { useEffect, useState } from 'react'
-import { getCache, updateCache } from '../../cache/musicCache'
+import { getCache, normalizeAssignment, updateCache } from '../../cache/musicCache'
 
 import { getResolver } from '../../actions/audio'
 import useTranslations from '../../hooks/useTranslations'
@@ -33,16 +33,19 @@ export default function GameSettings() {
       setLoading(true)
       const resolver = getResolver(settings.musicProvider)
       const cache = await getCache(parseInt(appid))
+      const assignment = normalizeAssignment(cache)
       if (typeof cache?.volume === 'number' && isFinite(cache.volume)) {
         setThemeVolume(cache.volume)
       } else {
         setThemeVolume(settings.volume)
       }
-      if (cache?.videoId?.length) {
-        const newAudio = await resolver.getAudioUrlFromVideo({
-          id: cache?.videoId
+      if (assignment?.kind === 'track') {
+        const newAudio = await getResolver(assignment.provider).getAudioUrlFromVideo({
+          id: assignment.trackId
         })
         setCurrentAudio(newAudio)
+      } else if (assignment?.kind === 'none') {
+        setCurrentAudio(undefined)
       } else {
         const newAudio = await resolver.getAudio(appName as string)
         setCurrentAudio(newAudio?.audioUrl)

@@ -1,6 +1,8 @@
 import asyncio
 import base64
 import datetime
+import glob
+import hashlib
 import json
 import os
 import ssl
@@ -18,6 +20,44 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+MIME_TYPES = {
+    "m4a": "audio/mp4",
+    "mp3": "audio/mpeg",
+    "webm": "audio/webm",
+    "ogg": "audio/ogg",
+    "wav": "audio/wav",
+    "aac": "audio/aac",
+    "flac": "audio/flac",
+    "opus": "audio/ogg",
+    "weba": "audio/webm",
+    "mp4": "audio/mp4"
+}
+
+PLAYABLE_EXTENSIONS = list(MIME_TYPES.keys())
+
+
+def provider_file_key(provider: str, track_id: str) -> str:
+    if provider == "youtube":
+        return f"youtube_{track_id}"
+    if provider == "khinsider":
+        return f"khinsider_{hashlib.md5(track_id.encode()).hexdigest()}"
+    return hashlib.md5(f"{provider}:{track_id}".encode()).hexdigest()
+
+
+def legacy_file_keys(provider: str, track_id: str) -> list[str]:
+    keys: list[str] = []
+    if provider == "youtube":
+        keys.append(track_id)
+    if provider == "khinsider":
+        keys.append(hashlib.md5(track_id.encode()).hexdigest())
+    return keys
+
+
+def extension_for_url(url: str) -> str:
+    ext = url.rsplit('.', 1)[-1].split('?', 1)[0].lower()
+    return ext if ext in PLAYABLE_EXTENSIONS else 'webm'
+
+
 def get_ytdlp_path() -> str:
     binary = "yt-dlp.exe" if platform.system() == "Windows" else "yt-dlp"
     return os.path.join(decky.DECKY_PLUGIN_DIR, "bin", binary)
@@ -25,7 +65,7 @@ def get_ytdlp_path() -> str:
 
 class Plugin:
     yt_process: asyncio.subprocess.Process | None = None
-    
+
     yt_process_lock = asyncio.Lock()
     ssl_context = ssl.create_default_context(cafile=certifi.where())
 
@@ -40,14 +80,16 @@ class Plugin:
         
         os.makedirs(self.music_path, exist_ok=True)
         os.makedirs(self.cache_path, exist_ok=True)
-        
-        
+
         try:
             path = Path(f"{decky.DECKY_PLUGIN_DIR}/bin/yt-dlp")
             if path.exists():
                 path.chmod(0o755)
         except Exception as e:
             print(f"Error setting permissions for yt-dlp: {e}")
+
+        ffmpeg_path = shutil.which("ffmpeg")
+        logger.info(f"ffmpeg available: {ffmpeg_path is not None} ({ffmpeg_path or 'not found'})")
 
         logger.info("Settings loaded.")
 
@@ -87,17 +129,15 @@ class Plugin:
                 path.chmod(0o755)
         except:
             pass
-            
+
         self.yt_process = await asyncio.create_subprocess_exec(
             ytdlp_path,
             f"ytsearch50:{term}",
             "-j",
             "-f", "bestaudio",
             "--match-filters", f"duration<?{20*60}",
-            "--flat-playlist",
             "--no-playlist",
             "--no-warnings",
-            "--no-check-certificates",
             "--quiet",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -157,48 +197,75 @@ class Plugin:
             return ""
 
     def local_match(self, id: str) -> str | None:
-        import glob
-        
         safe_id = glob.escape(id)
         local_matches = [
             x for x in glob.glob(f"{self.music_path}/{safe_id}.*")
-            if os.path.isfile(x) and x.rsplit('.', 1)[-1].lower() in ['webm', 'm4a', 'mp3', 'ogg', 'wav', 'aac', 'flac', 'opus', 'weba', 'mp4']
+            if os.path.isfile(x) and x.rsplit('.', 1)[-1].lower() in PLAYABLE_EXTENSIONS
         ]
         if len(local_matches) == 0:
             return None
 
         return local_matches[0]
 
+    def provider_local_match(self, provider: str, track_id: str) -> tuple[str, str] | None:
+        file_key = provider_file_key(provider, track_id)
+        local_match = self.local_match(file_key)
+        if local_match is not None:
+            return file_key, local_match
+
+        for legacy_key in legacy_file_keys(provider, track_id):
+            local_match = self.local_match(legacy_key)
+            if local_match is not None:
+                return legacy_key, local_match
+
+        return None
+
+    def stored_music_file_from_path(self, file_key: str, path: str):
+        extension = path.rsplit(".", 1)[-1].lower()
+        return {
+            "fileKey": file_key,
+            "extension": extension,
+            "mimeType": MIME_TYPES.get(extension, "audio/webm"),
+            "fileSize": os.path.getsize(path)
+        }
+
+    async def get_stored_music_file(self, provider: str, track_id: str):
+        local_match = self.provider_local_match(provider, track_id)
+        if local_match is None:
+            return None
+        file_key, path = local_match
+        return self.stored_music_file_from_path(file_key, path)
+
+    def serve_local_file(self, path: str):
+        file_size = os.path.getsize(path)
+        extension = path.rsplit(".", 1)[-1].lower()
+        mime_type = MIME_TYPES.get(extension, "audio/webm")
+        logger.info(f"Serving local audio as base64: {path} ({file_size} bytes)")
+        with open(path, "rb") as file:
+            return f"data:{mime_type};base64,{base64.b64encode(file.read()).decode()}"
+
+    async def stored_music_url(self, provider: str, track_id: str):
+        local_match = self.provider_local_match(provider, track_id)
+        if local_match is None:
+            return None
+        _, path = local_match
+        return self.serve_local_file(path)
+
+    async def local_audio_url(self, id: str):
+        provider = "khinsider" if id.startswith("https://downloads.khinsider.com/") else "youtube"
+        return await self.stored_music_url(provider, id)
+
     async def single_yt_url(self, id: str):
         if id.startswith("https://"):
             url = id
-            
-            import re
-            safe_id = re.sub(r'[^a-zA-Z0-9_\-]', '_', id.split('/')[-1])
         else:
             url = f"https://www.youtube.com/watch?v={id}"
-            safe_id = id
-            
-        local_match = self.local_match(safe_id)
+
+        local_match = self.provider_local_match("youtube", id)
+
         if local_match is not None:
-            # Reverting to base64 encoding as it's the most reliable method for offline use
-            extension = local_match.rsplit(".", 1)[-1].lower()
-            mime_types = {
-                "m4a": "audio/mp4",
-                "mp3": "audio/mpeg",
-                "webm": "audio/webm",
-                "ogg": "audio/ogg",
-                "wav": "audio/wav",
-                "aac": "audio/aac",
-                "flac": "audio/flac",
-                "opus": "audio/ogg",
-                "weba": "audio/webm",
-                "mp4": "audio/mp4"
-            }
-            mime_type = mime_types.get(extension, "audio/webm")
-            
-            with open(local_match, "rb") as file:
-                return f"data:{mime_type};base64,{base64.b64encode(file.read()).decode()}"
+            _, path = local_match
+            return self.serve_local_file(path)
 
         result = await asyncio.create_subprocess_exec(
             f"{decky.DECKY_PLUGIN_DIR}/bin/yt-dlp",
@@ -208,7 +275,6 @@ class Plugin:
             "bestaudio[protocol^=http][protocol!*=m3u8]/bestaudio/best",
             "--no-playlist",
             "--no-warnings",
-            "--no-check-certificates",
             "--quiet",
             "--extractor-args", "youtube:player-client=android,web",
             stdout=asyncio.subprocess.PIPE,
@@ -220,58 +286,107 @@ class Plugin:
         entry = json.loads(output)
         return entry["url"]
 
-    async def fetch_url(self, url: str):
-        async with aiohttp.ClientSession() as session:
-            try:
-                res = await session.get(url, ssl=self.ssl_context)
-                res.raise_for_status()
-                return await res.text()
-            except Exception as e:
-                print(f"Error fetching URL {url}: {e}")
-                return ""
-
     async def download_yt_audio(self, id: str):
         if id.startswith("https://"):
             url = id
-            
-            import re
-            safe_id = re.sub(r'[^a-zA-Z0-9_\-]', '_', id.split('/')[-1])
         else:
             url = f"https://www.youtube.com/watch?v={id}"
-            safe_id = id
 
-        if self.local_match(safe_id) is not None:
-            
-            return
-        
-        process = await asyncio.create_subprocess_exec(
-            f"{decky.DECKY_PLUGIN_DIR}/bin/yt-dlp",
-            url,
-            "-f",
-            "bestaudio[protocol^=http][protocol!*=m3u8]/bestaudio/best",
-            "-o",
-            f"{safe_id}.%(ext)s",
-            "-P",
-            self.music_path,
-            "--no-playlist",
-            "--no-warnings",
-            "--no-check-certificates",
-            "--quiet",
-            "--extractor-args", "youtube:player-client=android,web",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env={**os.environ, "LD_LIBRARY_PATH": "/usr/lib:/usr/lib64:/lib:/lib64"},
-        )
+        existing = self.provider_local_match("youtube", id)
+        if existing is not None:
+            file_key, path = existing
+            return self.stored_music_file_from_path(file_key, path)
+
+        safe_id = provider_file_key("youtube", id)
+
+        has_ffmpeg = shutil.which("ffmpeg") is not None
+
+        if has_ffmpeg:
+            process = await asyncio.create_subprocess_exec(
+                f"{decky.DECKY_PLUGIN_DIR}/bin/yt-dlp",
+                url,
+                "-x",
+                "--audio-format", "mp3",
+                "--audio-quality", "128K",
+                "-o",
+                f"{safe_id}.%(ext)s",
+                "-P",
+                self.music_path,
+                "--no-playlist",
+                "--no-warnings",
+                "--quiet",
+                "--extractor-args", "youtube:player-client=android,web",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env={**os.environ, "LD_LIBRARY_PATH": "/usr/lib:/usr/lib64:/lib:/lib64"},
+            )
+        else:
+            process = await asyncio.create_subprocess_exec(
+                f"{decky.DECKY_PLUGIN_DIR}/bin/yt-dlp",
+                url,
+                "-f",
+                "bestaudio[protocol^=http][protocol!*=m3u8]/bestaudio/best",
+                "-o",
+                f"{safe_id}.%(ext)s",
+                "-P",
+                self.music_path,
+                "--no-playlist",
+                "--no-warnings",
+                "--quiet",
+                "--extractor-args", "youtube:player-client=android,web",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env={**os.environ, "LD_LIBRARY_PATH": "/usr/lib:/usr/lib64:/lib:/lib64"},
+            )
         stdout, stderr = await process.communicate()
         if process.returncode != 0:
             err_msg = stderr.decode() if stderr else 'Unknown error'
             raise Exception(f"yt-dlp failed to download: {err_msg}")
 
-        original_path = os.path.join(self.music_path, f"{id}.m4a")
-        renamed_path = os.path.join(self.music_path, f"{id}.webm")
-        if os.path.exists(original_path):
-            logger.info(f"Renaming {original_path} to {renamed_path}")
-            os.rename(original_path, renamed_path)
+        if not has_ffmpeg:
+            original_path = os.path.join(self.music_path, f"{safe_id}.m4a")
+            renamed_path = os.path.join(self.music_path, f"{safe_id}.webm")
+            if os.path.exists(original_path):
+                logger.info(f"Renaming {original_path} to {renamed_path}")
+                os.rename(original_path, renamed_path)
+
+        local_file = self.local_match(safe_id)
+        if local_file is not None:
+            logger.info(f"Downloaded audio: {local_file} ({os.path.getsize(local_file)} bytes), ffmpeg={has_ffmpeg}")
+            return self.stored_music_file_from_path(safe_id, local_file)
+        else:
+            logger.warning(f"Download completed but no output file found for {safe_id}")
+            return None
+
+    async def download_url(self, url: str, id: str):
+        logger.info(f"Downloading file from URL: {url} for id {id}")
+
+        existing = self.provider_local_match("khinsider", id)
+        if existing is not None:
+            file_key, path = existing
+            return self.stored_music_file_from_path(file_key, path)
+
+        safe_id = provider_file_key("khinsider", id)
+        ext = extension_for_url(url)
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                    'Referer': id if id.startswith('https://') else 'https://downloads.khinsider.com/'
+                }
+                res = await session.get(url, headers=headers, ssl=self.ssl_context)
+                logger.info(f"download_url response status: {res.status}, content-type: {res.headers.get('content-type')}")
+                res.raise_for_status()
+                file_path = os.path.join(self.music_path, f"{safe_id}.{ext}")
+                with open(file_path, "wb") as file:
+                    async for chunk in res.content.iter_chunked(1024):
+                        file.write(chunk)
+                logger.info(f"Download complete: {file_path}")
+                return self.stored_music_file_from_path(safe_id, file_path)
+        except Exception as e:
+            logger.error(f"download_url failed for {url}: {e}")
+            raise
 
     async def clear_downloads(self):
         logger.info("Clearing all downloaded music files...")
